@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/retzkek/myjob/pkg/lens"
 	log "github.com/sirupsen/logrus"
 )
@@ -22,6 +24,8 @@ func main() {
 
 	statusHandler := JobStatus{}
 	http.Handle("/status/{jobid}", loggingHandler(statusHandler))
+
+	http.Handle("/metrics", loggingHandler(promhttp.Handler()))
 
 	fmt.Println("Listening on", *address)
 	http.ListenAndServe(*address, nil)
@@ -49,6 +53,21 @@ func (s JobStatus) getStatus(ctx context.Context, jobid string, w io.Writer) err
 	return nil
 }
 
+var (
+	requestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Histogram of http request durations.",
+			Buckets: []float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 25, 50, 100, 250},
+		},
+		[]string{"path"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(requestDuration)
+}
+
 // loggingHandler wraps an http.Handler to log each request
 func loggingHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +77,8 @@ func loggingHandler(h http.Handler) http.Handler {
 		switch {
 		case strings.HasPrefix(path, "/status"):
 			mpath = "/status"
+		case strings.HasPrefix(path, "/metrics"):
+			mpath = "/metrics"
 		default:
 			mpath = "other"
 		}
@@ -73,6 +94,7 @@ func loggingHandler(h http.Handler) http.Handler {
 			"duration_ns": d.Nanoseconds(),
 			"duration":    d.String(),
 		}).Info("handled request")
+		requestDuration.WithLabelValues(mpath).Observe(d.Seconds())
 	})
 }
 
