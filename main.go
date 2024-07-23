@@ -1,34 +1,42 @@
 package main
 
 import (
-	"log"
-	"os"
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
 
-	"github.com/clok/kemba"
-	"github.com/urfave/cli/v2"
+	"github.com/retzkek/myjob/pkg/lens"
+)
+
+var (
+	address = flag.String("a", "localhost:8888", "Address and port to listen on")
 )
 
 func main() {
-	k := kemba.New("myjob")
+	flag.Parse()
 
-	k.Log("initializing cli app")
-	app := &cli.App{
-		Usage: "My job management client",
-		Flags: []cli.Flag{},
-		Commands: []*cli.Command{
-			{
-				Name:    "status",
-				Aliases: []string{},
-				Usage:   "fetch submission status",
-				Flags:   StatusFlags,
-				Action:  Status,
-			},
-		},
-	}
+	http.HandleFunc("/status/{jobid}", func(w http.ResponseWriter, r *http.Request) {
+		if err := JobStatus(r.Context(), r.PathValue("jobid"), w); err != nil {
+			http.Error(w, err.Error(), 503)
+		}
+	})
 
-	k.Log("running cli app")
-	err := app.Run(os.Args)
+	fmt.Println("Listening on", *address)
+	http.ListenAndServe(*address, nil)
+}
+
+func JobStatus(ctx context.Context, jobid string, w io.Writer) error {
+	j, err := lens.GetJobInfo(ctx, jobid)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+
+	done := "not done"
+	if j.Done {
+		done = "done"
+	}
+	fmt.Fprintf(w, "Subission %s submitted by %s at %s is %s.\n", jobid, j.Owner, j.SubmitTime.String(), done)
+	return nil
 }
