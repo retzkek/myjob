@@ -7,16 +7,18 @@ import (
 	"time"
 
 	"github.com/machinebox/graphql"
-	opentracing "github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 type Job struct {
-	ID            string
-	Owner         string
-	Group         string
-	Subject       string
+	ID         string
+	Owner      string
+	Group      string
+	Subject    string
 	SubmitTime time.Time
-	Done          bool
+	Done       bool
 }
 
 var (
@@ -50,9 +52,9 @@ func GetJobInfo(ctx context.Context, jobid string) (*Job, error) {
 
 // GetJobInfo looks up the information for the job/submission.
 func (l *Lens) GetJobInfo(ctx context.Context, jobid string) (*Job, error) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "lens.GetJobInfo")
-	defer span.Finish()
-	span.SetTag("job.id", jobid)
+	ctx, span := l.tracer.Start(ctx, "GetJobInfo")
+	defer span.End()
+	span.SetAttributes(attribute.String("job.id", jobid))
 
 	if l.client == nil {
 		return nil, spanError(span, "Lens client was not initialized")
@@ -73,11 +75,7 @@ func (l *Lens) GetJobInfo(ctx context.Context, jobid string) (*Job, error) {
 	}
 
 	req := graphql.NewRequest(q)
-	span.Tracer().Inject(
-		span.Context(),
-		opentracing.HTTPHeaders,
-		opentracing.HTTPHeadersCarrier(req.Header),
-	)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 	var resp struct {
 		Job *Job
 	}
